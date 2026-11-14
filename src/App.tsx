@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -27,25 +27,18 @@ import {
   LayoutDashboard,
   Plus,
   Search,
-  Filter,
   Download,
   CheckCircle2,
   AlertTriangle,
-  ShieldAlert,
-  UserCheck,
-  Users,
   Navigation,
   X,
   Check,
-  Clock,
   GripVertical,
   Trash2,
   LogOut,
   LogIn,
   Image as ImageIcon,
-  SlidersHorizontal,
   ExternalLink,
-  Activity,
   Waves,
 } from 'lucide-react';
 
@@ -258,13 +251,13 @@ const INITIAL_TACHES_EAU = [
 // ============================================================================
 // UTILITAIRE DE COMPRESSION PHOTO (Multiple photos légères < 200 Ko)
 // ============================================================================
-const compressPhoto = (file) => {
+const compressPhoto = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
       const img = new Image();
-      img.src = event.target.result;
+      img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const MAX_W = 720;
@@ -384,7 +377,7 @@ export default function App() {
     const unsubTaches = onSnapshot(
       tachesRef,
       (snapshot) => {
-        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const list: any[] = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         setTaches(list);
         setLoading(false);
@@ -396,7 +389,7 @@ export default function App() {
       agentsRef,
       (snapshot) => {
         if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({ docId: d.id, ...d.data() }));
+          const list: any[] = snapshot.docs.map((d) => ({ docId: d.id, ...d.data() }));
           // Conserver un ordre cohérent
           list.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
           setAgents(list);
@@ -1265,8 +1258,8 @@ function TerrainFormView({ loggedAgent, agents, onSubmit, onCancel }) {
     }
   };
 
-  const handleAddPhotos = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const handleAddPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     try {
       const compressedList = await Promise.all(
@@ -2575,7 +2568,7 @@ function TacheDetailModal({
 
   const handleSave = (e) => {
     e.preventDefault();
-    const updates = {
+    const updates: Record<string, any> = {
       notes,
       statut,
       priorite,
