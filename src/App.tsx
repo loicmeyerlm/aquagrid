@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { ChangeEvent, DragEvent, FormEvent } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   signInAnonymously,
   signInWithCustomToken,
   onAuthStateChanged,
+  type User,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -27,25 +29,18 @@ import {
   LayoutDashboard,
   Plus,
   Search,
-  Filter,
   Download,
   CheckCircle2,
   AlertTriangle,
-  ShieldAlert,
-  UserCheck,
-  Users,
   Navigation,
   X,
   Check,
-  Clock,
   GripVertical,
   Trash2,
   LogOut,
   LogIn,
   Image as ImageIcon,
-  SlidersHorizontal,
   ExternalLink,
-  Activity,
   Waves,
 } from 'lucide-react';
 
@@ -68,9 +63,59 @@ const appId =
   typeof __app_id !== 'undefined' ? __app_id : 'aquagrid-pro-eau-potable';
 
 // ============================================================================
+// TYPES
+// ============================================================================
+interface Agent {
+  id: string;
+  docId?: string;
+  nom: string;
+  role: string;
+  secteur: string;
+  isAdmin: boolean;
+  avatar: string;
+  couleur: string;
+}
+
+interface TacheData {
+  code?: string;
+  type?: string;
+  titre?: string;
+  ouvrage?: string;
+  chloreMgL?: number | null;
+  turbiditeNtu?: number | null;
+  debitFuite?: string;
+  diametreConduite?: string;
+  natureTerrain?: string;
+  typeMaintenance?: string;
+  priorite?: string;
+  statut?: string;
+  agentId?: string;
+  datePlanifiee?: string;
+  createurNom?: string;
+  dateCreation?: string;
+  lat?: number | null;
+  lng?: number | null;
+  adresseGps?: string;
+  notes?: string;
+  photos?: string[];
+  createdAt?: number;
+}
+
+interface Tache extends TacheData {
+  id: string;
+}
+
+type TacheUpdates = Partial<TacheData>;
+
+interface Toast {
+  msg: string;
+  type: string;
+}
+
+// ============================================================================
 // AGENTS D'EXPLOITATION & JOURS DU PLANNING
 // ============================================================================
-const AGENTS_INITIAUX = [
+const AGENTS_INITIAUX: Agent[] = [
   {
     id: 'ag1',
     nom: 'Claire Valette',
@@ -126,7 +171,7 @@ const JOURS_SEMAINE = [
   { id: '2026-11-20', label: 'Ven 20 Nov', court: 'Ven 20' },
 ];
 
-const INITIAL_TACHES_EAU = [
+const INITIAL_TACHES_EAU: TacheData[] = [
   {
     code: 'AQ-2026-01',
     type: 'Tour de chlore',
@@ -258,13 +303,13 @@ const INITIAL_TACHES_EAU = [
 // ============================================================================
 // UTILITAIRE DE COMPRESSION PHOTO (Multiple photos légères < 200 Ko)
 // ============================================================================
-const compressPhoto = (file) => {
+const compressPhoto = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
       const img = new Image();
-      img.src = event.target.result;
+      img.src = String(event.target?.result ?? '');
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const MAX_W = 720;
@@ -272,6 +317,10 @@ const compressPhoto = (file) => {
         canvas.width = img.width > MAX_W ? MAX_W : img.width;
         canvas.height = img.width > MAX_W ? img.height * scale : img.height;
         const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas 2D context unavailable'));
+          return;
+        }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL('image/jpeg', 0.68));
       };
@@ -286,13 +335,13 @@ const compressPhoto = (file) => {
 // ============================================================================
 export default function App() {
   // --- Auth & Profil Agent connecté en nom propre ---
-  const [firebaseUser, setFirebaseUser] = useState(null);
-  const [agents, setAgents] = useState(AGENTS_INITIAUX);
-  const [loggedAgent, setLoggedAgent] = useState(null); // null = écran de connexion en nom propre affiché au choix ou pré-connecté
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [agents, setAgents] = useState<Agent[]>(AGENTS_INITIAUX);
+  const [loggedAgent, setLoggedAgent] = useState<Agent | null>(null); // null = écran de connexion en nom propre affiché au choix ou pré-connecté
   const [showLoginModal, setShowLoginModal] = useState(true);
 
   // --- Données Tâches / Remontées ---
-  const [taches, setTaches] = useState([]);
+  const [taches, setTaches] = useState<Tache[]>([]);
   const [loading, setLoading] = useState(true);
 
   // --- Navigation ---
@@ -305,12 +354,12 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // --- Sélection & Détail Tâche ---
-  const [selectedTache, setSelectedTache] = useState(null);
-  const [lightboxUrl, setLightboxUrl] = useState(null);
+  const [selectedTache, setSelectedTache] = useState<Tache | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   // --- Toast Notifications ---
-  const [toast, setToast] = useState(null);
-  const notify = (msg, type = 'info') => {
+  const [toast, setToast] = useState<Toast | null>(null);
+  const notify = (msg: string, type = 'info') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
   };
@@ -384,7 +433,9 @@ export default function App() {
     const unsubTaches = onSnapshot(
       tachesRef,
       (snapshot) => {
-        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const list = snapshot.docs.map(
+          (d) => ({ ...d.data(), id: d.id }) as Tache
+        );
         list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         setTaches(list);
         setLoading(false);
@@ -396,7 +447,9 @@ export default function App() {
       agentsRef,
       (snapshot) => {
         if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({ docId: d.id, ...d.data() }));
+          const list = snapshot.docs.map(
+            (d) => ({ docId: d.id, ...d.data() }) as Agent
+          );
           // Conserver un ordre cohérent
           list.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
           setAgents(list);
@@ -414,7 +467,7 @@ export default function App() {
   // --------------------------------------------------------------------------
   // ACTIONS CRUD SUR LES TÂCHES
   // --------------------------------------------------------------------------
-  const handleCreateTache = async (newTacheData) => {
+  const handleCreateTache = async (newTacheData: TacheData) => {
     if (!firebaseUser) return;
     try {
       const tachesRef = collection(
@@ -449,7 +502,7 @@ export default function App() {
     }
   };
 
-  const handleUpdateTache = async (tacheId, updates) => {
+  const handleUpdateTache = async (tacheId: string, updates: TacheUpdates) => {
     if (!firebaseUser) return;
     try {
       const ref = doc(
@@ -463,7 +516,7 @@ export default function App() {
       );
       await updateDoc(ref, updates);
       if (selectedTache && selectedTache.id === tacheId) {
-        setSelectedTache((prev) => ({ ...prev, ...updates }));
+        setSelectedTache((prev) => (prev ? { ...prev, ...updates } : prev));
       }
       notify('Mise à jour enregistrée', 'success');
     } catch (err) {
@@ -471,7 +524,7 @@ export default function App() {
     }
   };
 
-  const handleDeleteTache = async (tacheId) => {
+  const handleDeleteTache = async (tacheId: string) => {
     if (!firebaseUser) return;
     try {
       await deleteDoc(
@@ -484,15 +537,19 @@ export default function App() {
     }
   };
 
-  const handleCreateNewAgent = async (nom, role, secteur) => {
+  const handleCreateNewAgent = async (
+    nom: string,
+    role: string,
+    secteur: string
+  ) => {
     if (!firebaseUser) return;
     const initials = nom
       .split(' ')
-      .map((n) => n[0])
+      .map((n: string) => n[0])
       .join('')
       .toUpperCase()
       .slice(0, 2);
-    const newAg = {
+    const newAg: Agent = {
       id: 'ag-' + Date.now(),
       nom,
       role,
@@ -603,7 +660,7 @@ export default function App() {
   const alertesChlore = taches.filter(
     (t) =>
       t.type === 'Tour de chlore' &&
-      t.chloreMgL !== null &&
+      t.chloreMgL != null &&
       (t.chloreMgL < 0.1 || t.chloreMgL > 0.5) &&
       t.statut !== 'Terminée'
   ).length;
@@ -641,7 +698,7 @@ export default function App() {
         <LoginAgentModal
           agents={agents}
           currentAgent={loggedAgent}
-          onSelectAgent={(ag) => {
+          onSelectAgent={(ag: Agent) => {
             setLoggedAgent(ag);
             setShowLoginModal(false);
             // Sur mobile ou profil terrain, ouvrir directement la saisie terrain si souhaité
@@ -978,7 +1035,7 @@ export default function App() {
           tache={selectedTache}
           agents={agents}
           onClose={() => setSelectedTache(null)}
-          onUpdate={(updates) => handleUpdateTache(selectedTache.id, updates)}
+          onUpdate={(updates: TacheUpdates) => handleUpdateTache(selectedTache.id, updates)}
           onDelete={() => handleDeleteTache(selectedTache.id)}
           onPreviewPhoto={setLightboxUrl}
         />
@@ -1012,19 +1069,27 @@ export default function App() {
 // ============================================================================
 // COMPOSANT 1 : MODALE CONNEXION AGENT EN NOM PROPRE
 // ============================================================================
+interface LoginAgentModalProps {
+  agents: Agent[];
+  currentAgent: Agent | null;
+  onSelectAgent: (agent: Agent) => void;
+  onCreateAgent: (nom: string, role: string, secteur: string) => void;
+  onClose: (() => void) | null;
+}
+
 function LoginAgentModal({
   agents,
   currentAgent,
   onSelectAgent,
   onCreateAgent,
   onClose,
-}) {
+}: LoginAgentModalProps) {
   const [modeCreate, setModeCreate] = useState(false);
   const [nom, setNom] = useState('');
   const [role, setRole] = useState('Agent Réseau & Fuites');
   const [secteur, setSecteur] = useState('Secteur Centre');
 
-  const handleSubmitCreate = (e) => {
+  const handleSubmitCreate = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!nom.trim()) return;
     onCreateAgent(nom.trim(), role, secteur);
@@ -1185,7 +1250,19 @@ function LoginAgentModal({
 // ============================================================================
 // COMPOSANT 2 : FORMULAIRE TERRAIN (CHLORE, FUITE, TÂCHE, PHOTOS & GPS)
 // ============================================================================
-function TerrainFormView({ loggedAgent, agents, onSubmit, onCancel }) {
+interface TerrainFormViewProps {
+  loggedAgent: Agent | null;
+  agents: Agent[];
+  onSubmit: (data: TacheData) => void;
+  onCancel: () => void;
+}
+
+function TerrainFormView({
+  loggedAgent,
+  agents,
+  onSubmit,
+  onCancel,
+}: TerrainFormViewProps) {
   const [type, setType] = useState('Tour de chlore'); // 'Tour de chlore' | 'Fuite' | 'Maintenance'
   const [titre, setTitre] = useState('');
   const [ouvrage, setOuvrage] = useState('');
@@ -1209,11 +1286,16 @@ function TerrainFormView({ loggedAgent, agents, onSubmit, onCancel }) {
   const [notes, setNotes] = useState('');
 
   // Photos multiples
-  const [photos, setPhotos] = useState([]);
-  const fileRef = useRef(null);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Géolocalisation GPS
-  const [gps, setGps] = useState({
+  const [gps, setGps] = useState<{
+    status: string;
+    lat: number | null;
+    lng: number | null;
+    adresse: string;
+  }>({
     status: 'idle',
     lat: null,
     lng: null,
@@ -1265,7 +1347,7 @@ function TerrainFormView({ loggedAgent, agents, onSubmit, onCancel }) {
     }
   };
 
-  const handleAddPhotos = async (e) => {
+  const handleAddPhotos = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     try {
@@ -1278,7 +1360,7 @@ function TerrainFormView({ loggedAgent, agents, onSubmit, onCancel }) {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const autoTitre =
       titre.trim() ||
@@ -1758,6 +1840,24 @@ function TerrainFormView({ loggedAgent, agents, onSubmit, onCancel }) {
 // ============================================================================
 // COMPOSANT 3 : VUE TABLEUR & ÉDITION DIRECTE (FORMAT BASE DE DONNÉES)
 // ============================================================================
+interface SpreadsheetViewProps {
+  taches: Tache[];
+  allTachesCount: number;
+  agents: Agent[];
+  filterType: string;
+  setFilterType: (value: string) => void;
+  filterStatut: string;
+  setFilterStatut: (value: string) => void;
+  filterAgent: string;
+  setFilterAgent: (value: string) => void;
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  onUpdateTache: (tacheId: string, updates: TacheUpdates) => void;
+  onSelectTache: (tache: Tache) => void;
+  onExportCSV: () => void;
+  onPreviewPhoto: (url: string) => void;
+}
+
 function SpreadsheetView({
   taches,
   allTachesCount,
@@ -1774,7 +1874,7 @@ function SpreadsheetView({
   onSelectTache,
   onExportCSV,
   onPreviewPhoto,
-}) {
+}: SpreadsheetViewProps) {
   return (
     <div className="space-y-4">
       {/* Barre d'outils & Filtres du Tableur */}
@@ -1915,7 +2015,7 @@ function SpreadsheetView({
                 taches.map((t) => {
                   const isChloreBad =
                     t.type === 'Tour de chlore' &&
-                    t.chloreMgL !== null &&
+                    t.chloreMgL != null &&
                     (t.chloreMgL < 0.1 || t.chloreMgL > 0.5);
                   const isDone = t.statut === 'Terminée';
 
@@ -2120,7 +2220,7 @@ function SpreadsheetView({
 
                           {t.photos && t.photos.length > 0 && (
                             <button
-                              onClick={() => onPreviewPhoto(t.photos[0])}
+                              onClick={() => t.photos?.[0] && onPreviewPhoto(t.photos[0])}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
                             >
                               <ImageIcon className="w-3.5 h-3.5 text-cyan-600" />
@@ -2154,26 +2254,33 @@ function SpreadsheetView({
 // ============================================================================
 // COMPOSANT 4 : PLANNING DES AGENTS AVEC GLISSER-DÉPOSER (DRAG & DROP)
 // ============================================================================
+interface PlanningDragDropViewProps {
+  taches: Tache[];
+  agents: Agent[];
+  onUpdateTache: (tacheId: string, updates: TacheUpdates) => void;
+  onSelectTache: (tache: Tache) => void;
+}
+
 function PlanningDragDropView({
   taches,
   agents,
   onUpdateTache,
   onSelectTache,
-}) {
-  const [draggedTacheId, setDraggedTacheId] = useState(null);
-  const [dragOverCell, setDragOverCell] = useState(null); // `${agentId}_${jourId}`
+}: PlanningDragDropViewProps) {
+  const [draggedTacheId, setDraggedTacheId] = useState<string | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<string | null>(null); // `${agentId}_${jourId}`
 
   const tachesNonPlanifiees = taches.filter(
     (t) => (!t.agentId || !t.datePlanifiee) && t.statut !== 'Terminée'
   );
 
-  const handleDragStart = (e, tacheId) => {
+  const handleDragStart = (e: DragEvent<HTMLElement>, tacheId: string) => {
     setDraggedTacheId(tacheId);
     e.dataTransfer.setData('text/plain', tacheId);
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e, cellKey) => {
+  const handleDragOver = (e: DragEvent<HTMLElement>, cellKey: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     if (dragOverCell !== cellKey) {
@@ -2181,7 +2288,11 @@ function PlanningDragDropView({
     }
   };
 
-  const handleDropOnCell = (e, agentId, jourId) => {
+  const handleDropOnCell = (
+    e: DragEvent<HTMLElement>,
+    agentId: string,
+    jourId: string
+  ) => {
     e.preventDefault();
     const tacheId = e.dataTransfer.getData('text/plain') || draggedTacheId;
     setDragOverCell(null);
@@ -2195,7 +2306,7 @@ function PlanningDragDropView({
     });
   };
 
-  const handleDropBackToUnassigned = (e) => {
+  const handleDropBackToUnassigned = (e: DragEvent<HTMLElement>) => {
     e.preventDefault();
     const tacheId = e.dataTransfer.getData('text/plain') || draggedTacheId;
     setDragOverCell(null);
@@ -2390,12 +2501,19 @@ function PlanningDragDropView({
 // ============================================================================
 // COMPOSANT 5 : SYNTHÈSE QUALITÉ CHLORE & CARTE GPS DES INTERVENTIONS
 // ============================================================================
+interface DashboardAndMapViewProps {
+  taches: Tache[];
+  agents: Agent[];
+  onSelectTache: (tache: Tache) => void;
+  onPreviewPhoto: (url: string) => void;
+}
+
 function DashboardAndMapView({
   taches,
   agents,
   onSelectTache,
   onPreviewPhoto,
-}) {
+}: DashboardAndMapViewProps) {
   const relevesChlore = taches.filter((t) => t.type === 'Tour de chlore');
   const tachesGeolocalisees = taches.filter((t) => t.lat && t.lng);
 
@@ -2527,7 +2645,7 @@ function DashboardAndMapView({
                     <div className="flex items-center gap-1.5">
                       {t.photos?.[0] && (
                         <button
-                          onClick={() => onPreviewPhoto(t.photos[0])}
+                          onClick={() => t.photos?.[0] && onPreviewPhoto(t.photos[0])}
                           className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
                           title="Voir photo"
                         >
@@ -2558,6 +2676,15 @@ function DashboardAndMapView({
 // ============================================================================
 // COMPOSANT 6 : MODALE DE DÉTAIL COMPLET & ÉVOLUTION D'UNE TÂCHE
 // ============================================================================
+interface TacheDetailModalProps {
+  tache: Tache;
+  agents: Agent[];
+  onClose: () => void;
+  onUpdate: (updates: TacheUpdates) => void;
+  onDelete: () => void;
+  onPreviewPhoto: (url: string) => void;
+}
+
 function TacheDetailModal({
   tache,
   agents,
@@ -2565,17 +2692,19 @@ function TacheDetailModal({
   onUpdate,
   onDelete,
   onPreviewPhoto,
-}) {
+}: TacheDetailModalProps) {
   const [notes, setNotes] = useState(tache.notes || '');
   const [statut, setStatut] = useState(tache.statut || 'À planifier');
   const [priorite, setPriorite] = useState(tache.priorite || 'Normale');
   const [agentId, setAgentId] = useState(tache.agentId || '');
   const [datePlanifiee, setDatePlanifiee] = useState(tache.datePlanifiee || '');
-  const [chloreMgL, setChloreMgL] = useState(tache.chloreMgL ?? '');
+  const [chloreMgL, setChloreMgL] = useState<string>(
+    tache.chloreMgL != null ? String(tache.chloreMgL) : ''
+  );
 
-  const handleSave = (e) => {
+  const handleSave = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const updates = {
+    const updates: TacheUpdates = {
       notes,
       statut,
       priorite,
